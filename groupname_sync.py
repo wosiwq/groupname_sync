@@ -2,10 +2,11 @@ from hoshino import Service, priv
 from .data_source import *
 import aiohttp
 
-name_old = None
-default_groupname = None
-
 sv = Service('群昵称同步', manage_priv=priv.SUPERUSER, enable_on_default=False)
+
+name_old = None
+group_list = {}
+FILE_PATH = os.path.dirname(__file__)
 
 try:
     config = hoshino.config.groupname_sync.config
@@ -17,14 +18,28 @@ try:
 except OSError:
     yobot_url = config.yobot_url
 
+
+def save_group_list():
+    with open(os.path.join(FILE_PATH, 'group_list.json'), 'w', encoding='UTF-8') as f:
+        json.dump(group_list, f, ensure_ascii=False)
+
+
+if not os.path.exists(os.path.join(FILE_PATH, 'group_list.json')):
+    save_group_list()
+    hoshino.logger.error('未找到group_list.json，已创建')
+
+with open(os.path.join(FILE_PATH, 'group_list.json'), 'r', encoding='UTF-8') as f:
+    group_list = json.load(f)
+
 @sv.on_message()
 async def groupname_sync(bot, ev):
     # 访问yobot api获取伤害等信息
     global name_old
     gid = ev.group_id
 
-    if default_groupname == None:
+    if not group_list.get(str(gid)):
         return
+
     if len(yobot_url) == 0:
         await bot.finish(ev, '获取api地址失败，请检查配置')
     if not get_db_path():
@@ -45,45 +60,75 @@ async def groupname_sync(bot, ev):
         print('无法访问API，请检查yobot服务器状态')
         return
 
-    if data['challenges'][len(data['challenges'])-1]['health_ramain'] != 0:
-        name_new = str(data['challenges'][len(data['challenges'])-1]['cycle']) + '-' + str(data['challenges'][len(data['challenges'])-1]['boss_num'])
-    elif data['challenges'][len(data['challenges'])-1]['boss_num'] == 5 :
-        name_new = str(data['challenges'][len(data['challenges']) - 1]['cycle']+1) + '-1'
+    if data['challenges'][len(data['challenges']) - 1]['health_ramain'] != 0:
+        name_new = str(data['challenges'][len(data['challenges']) - 1]['cycle']) + '-' + str(
+            data['challenges'][len(data['challenges']) - 1]['boss_num'])
+    elif data['challenges'][len(data['challenges']) - 1]['boss_num'] == 5:
+        name_new = str(data['challenges'][len(data['challenges']) - 1]['cycle'] + 1) + '-1'
     else:
-        name_new = str(data['challenges'][len(data['challenges']) - 1]['cycle']) + '-' + str(data['challenges'][len(data['challenges']) - 1]['boss_num'] + 1)
+        name_new = str(data['challenges'][len(data['challenges']) - 1]['cycle']) + '-' + str(
+            data['challenges'][len(data['challenges']) - 1]['boss_num'] + 1)
     if name_old == name_new:
         return
     else:
         name_old = name_new
         try:
             await bot.set_group_name(
-                group_id = gid,
-                group_name = default_groupname+  name_old
+                group_id=gid,
+                group_name=group_list[str(gid)] + name_old
             )
         except Exception as e:
-            await bot.send(ev, '群名修改失败惹...\n错误代码：{e}')
+            await bot.send(ev, f'群名修改失败惹...\n错误代码：{str(e)}')
 
-@sv.on_prefix('初始化群名')
-async def set_default_groupname(bot, ev):
-    global default_groupname
+
+@sv.on_prefix('启用群昵称同步')
+async def enable_groupname_sync(bot, ev):
+    if not priv.check_priv(ev, priv.ADMIN):
+        await bot.finish(ev, '抱歉，您非管理员，无此指令使用权限')
+    global name_old
+    name_old = None
     gid = ev.group_id
-    try:
-        group_info = await bot.get_group_info(
-            group_id=gid
-        )
-        default_groupname = group_info['group_name']
-        await bot.send(ev, '初始化成功')
-    except Exception as e:
-        await bot.send(ev, '获取群名失败...')
-    pass
+    while group_list.get(str(gid)):
+        group_list.pop(str(gid))
+    s = ev.message.extract_plain_text()
+    if s:
+        group_list.update({str(gid) : s})
+        save_group_list()
+        await bot.send(ev, '初始化成功，默认群名设置为'+s)
+    else:
+        try:
+            group_info = await bot.get_group_info(
+                group_id=gid
+            )
+            group_list.update({str(gid) : group_info['group_name']})
+            save_group_list()
+            await bot.send(ev, '初始化成功，默认群名设置为'+group_info['group_name'])
+        except Exception as e:
+            await bot.send(ev, '获取群名失败...')
 
-@sv.on_prefix(('修改群名','设置群名'))
+@sv.on_fullmatch('禁用群昵称同步')
+async def disable_groupname_sync(bot, ev):
+    global name_old
+    gid = ev.group_id
+    if not priv.check_priv(ev, priv.ADMIN):
+        await bot.finish(ev, '抱歉，您非管理员，无此指令使用权限')
+    await bot.set_group_name(
+        group_id=gid,
+        group_name=group_list[str(gid)]
+    )
+    name_old = None
+    group_list.pop(str(gid))
+    save_group_list()
+    await bot.send(ev, '已禁用')
+
+@sv.on_prefix(('修改群名', '设置群名'))
 async def set_group_name(bot, ev):
-    global default_groupname
-    default_groupname = None
     gid = ev.group_id
+    group_list.pop(str(gid))
     name = ev.message.extract_plain_text()
     await bot.set_group_name(
-        group_id = gid,
-        group_name = name
+        group_id=gid,
+        group_name=name
     )
+    group_list.update({str(gid) : name})
+    save_group_list()
