@@ -11,7 +11,7 @@ FILE_PATH = os.path.dirname(__file__)
 try:
     config = hoshino.config.groupname_sync.config
 except:
-    hoshino.logger.error('not found config of clanbattlereport')
+    hoshino.logger.error('not found config of groupname_sync')
 
 try:
     yobot_url = get_web_address()
