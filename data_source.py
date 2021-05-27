@@ -1,9 +1,9 @@
 import hoshino, sqlite3, os ,json
 
 try:
-    config = hoshino.config.clanbattlereport.report_config
+    config = hoshino.config.groupname_sync.config
 except:
-    hoshino.logger.error('not found config of clanbattlereport')
+    hoshino.logger.error('not found config of groupname_sync')
 
 
 def get_db_path():
